@@ -1,0 +1,499 @@
+.model small
+.stack	100h  
+
+.data   
+            
+buffSize     db 201                      ;max number of characters
+realSize     db ?                        ;number of characters entered by user 
+buff         db 201 dup(0)               ;characters entered by user   
+
+wordCounter db 0
+wordNumber db 0  
+isSorted db 0  
+updatedSize db 0
+     
+newString db 0dh,0ah,'$'  
+      
+info_msg1 db "Enter your string: $"   
+info_msg7 db "Sorted string:$" 
+info_msg8 db "Result after one iteration:$"  
+info_msg9 db "Result after correction of string:$"
+
+FWPosition db 0
+SWPosition db 0
+EWPosition db 0 
+posCounter db 0 
+           
+
+
+.code 
+
+
+	                       
+print macro string                       ;print str to screen
+                                                     
+	  lea dx,string 
+	  mov ah,9
+	  int 21h  
+	  
+endm  
+
+inputStr macro string                    ;input string from keyboard
+    
+    lea dx,string
+    mov ah,0ah
+    int 21h  
+ 
+          
+endm  
+
+repLastEnter macro buff,realSize         ;change last symbol(enter) to $
+    
+    xor bh,bh
+    mov bl,realSize
+    mov byte ptr[buff+bx],'$'       
+    
+endm  
+
+deleteSpaces macro buff  
+    
+    mov   ax,SEG buff                    ;di:si = source pointer to read the string
+    mov   ds,ax                          ;es:di = destination pointer to write modified string
+    mov   es,ax                          ;bx = string pointer pointing +1 beyond last non space symbol
+    mov   si,OFFSET buff
+    mov   di,si
+    mov   bx,si 
+    
+    copyLoop: 
+                        
+        lodsb                            ; load symbol to al    
+        
+        cmp   al,'$'
+        je    setTerminatorAndExit 
+        
+        cmp al,9
+        je load  
+        
+        cmp   al,' '
+        jne   notSpace        
+        
+        load:
+        
+        jcxz  copyLoop          ; cant copy more enters than one,skip others
+                                ; copy the space   
+        dec cx                
+        cmp al,9
+        je enterSpace
+        stosb                   ; load al to di    
+        inc wordNumber  
+        inc updatedSize
+        jmp   copyLoop  
+        
+    enterSpace:  
+    
+        mov al,' '
+        stosb
+        inc wordNumber   
+        inc updatedSize
+        jmp copyLoop 
+        
+    notSpace:  
+    
+        mov   cx,1              ; one space can be copied next time
+        stosb                   ; copy non-space symbol to di
+        mov   bx,di             ; update bx to point +1 beyond last non-space char   
+        inc updatedSize
+        jmp   copyLoop
+
+    setTerminatorAndExit:
+    
+        inc wordNumber
+        mov   [bx],al           ; write the '$' to last non-space+1
+
+endm 
+
+prepStr macro buff,realSize  
+    
+    xor bh,bh
+    mov bl,realSize
+    mov byte ptr[buff+bx],' '   ;replace last symbol to space for easier search  
+    
+    mov cx,bx                   ;counter of all string = buffSize+1 
+    mov al,' '                  ;make imagine space for easier search
+    lea si,buff                 ;load string  
+    
+    mov posCounter,0
+    mov wordCounter,0   
+    mov isSorted, 0
+    
+endm
+
+findTwoWords macro
+      
+    Search:  
+    
+    cmp wordCounter,3
+    Je checkOnSortt
+    
+    mov ah,al                   ;save previous symbol
+    lodsb                       ;load to al symbol from string
+                                     
+    cmp al,' '                  ;check for the end of the word
+    Je endSpace   
+    
+    cmp ah,' '                  ;check for the start of the new word 
+    Jne nextSymbol     
+    
+    cmp wordCounter,0           ;save position of first word
+    Je FirstWord 
+    
+    cmp wordCounter,1           ;save position of second word
+    Je SecondWord
+    
+    cmp wordCounter,2           ;save position of end of the second word
+    Je EndWord
+    
+    Jmp nextSymbol
+    
+    
+    
+    endSpace:  
+    
+    cmp wordCounter,2                  ;compare previous symbol on space
+    Je EndWord
+    
+    nextSymbol: 
+    
+    inc posCounter
+    loop Search 
+    
+    cmp wordCounter,3
+    Je checkOnSortt
+    jmp endCorr
+    
+    jmp endCorr     
+                
+    FirstWord:
+    
+    assignCounter FWPosition
+    jmp nextSymbol
+    
+    SecondWord: 
+    
+    assignCounter SWPosition 
+    jmp nextSymbol
+    
+    EndWord:
+    
+    assignCounter EWPosition
+    dec EWPosition            ;current position in string is on the space  
+    jmp nextSymbol
+    
+    checkOnSortt: 
+   
+    checkOnSort               ;call macro    
+        
+    jc next
+    
+    sort 
+    mov isSorted,1
+    
+    next: 
+    
+    correctPositions         ;correct pointers after swap or skip    
+    
+    cmp cx,0                        ;check for the end of the string
+    je endCorr         
+    
+    mov wordCounter,0
+    
+    mov si,offset buff
+    xor bh,bh
+    mov bl,posCounter
+    add si,bx  
+    
+    mov al,' ' 
+    jmp Search
+    
+    endCorr:  
+     
+endm 
+
+assignCounter macro buff  
+    
+    mov bl,posCounter
+    mov buff,bl
+    inc wordCounter
+     
+endm
+
+checkOnSort macro   
+    
+    cld
+    
+    mov si,offset buff
+    xor bh,bh
+    mov bl,FWPosition
+    add si,bx         
+    
+    mov di,offset buff
+    mov bl,SWPosition
+    add di,bx   
+     
+    parse:
+    
+    cmp byte ptr[si],' '
+    je checkW1 
+    jmp checkW2
+    
+    checkW1:
+    
+    cmp byte ptr[di],' '
+    je noSwap               ;two words end => CF=0 
+    
+    stc                     ;only first word ends => CF=1 
+    jmp exit
+    
+    checkW2: 
+    
+    cmp byte ptr[di],' '
+    je noSwap   
+    
+    cmpsb                   ;if symbols equal - go to the next pair
+    je parse  
+    jmp exit                ;if symbols different - CF is set automatically
+     
+    noSwap:
+    
+    clc                     ;CF=0  
+    
+    exit:   
+    
+endm
+
+correctPositions macro isSwap
+           
+    jc isNoSwap 
+          
+    swap:
+    
+    xor dh,dh  
+    
+    mov dl,EWPosition
+    sub dl,SWPosition 
+    add dl,FWPosition
+    inc dl
+    
+    mov posCounter,dl 
+    inc posCounter
+    
+    mov dl,realSize
+    sub dl,posCounter  
+    
+    mov cx,dx
+    inc cx    
+    
+    jmp endOfCorrPositions
+    
+    isNoSwap:    
+    
+    xor dh,dh
+    
+    mov dl,SWPosition
+    mov posCounter,dl
+    
+    mov dl,realSize
+    sub dl,posCounter    ;count cx value  
+    
+    mov cx,dx
+    inc cx                            
+    
+    endOfCorrPositions:
+    
+endm 
+
+
+sort macro 
+    
+    xor ah,ah   
+    
+    setPosition FWPosition,EWPosition               
+ 
+    LoadStr1:
+    
+      lodsb
+      push ax  
+      
+    loop LoadStr1                                       ;reverse main string   
+            
+    setPosition FWPosition,EWPosition                                           
+                        
+    TakeStr1:  
+      
+      pop dx
+      mov [si],dl
+      inc si    
+      
+    loop TakeStr1 
+ 
+    
+    xor dx,dx
+    mov dl,EWPosition
+    sub dl,SWPosition  
+    add dl,FWPosition
+    
+    setPosition FWPosition,dl
+    
+    xor ax,ax 
+    
+    LoadStr2:
+    
+      lodsb
+      push ax   
+      
+    loop LoadStr2                                      ;reverse first word
+    
+    mov dl,EWPosition
+    sub dl,SWPosition
+    add dl,FWPosition 
+                                                                                                                                  
+    setPosition FWPosition,dl   
+    
+    TakeStr2:  
+      
+      pop dx
+      mov [si],dl
+      inc si    
+      
+    loop TakeStr2  
+    
+    
+    xor dx,dx 
+    xor ax,ax
+    mov dl,SWPosition
+    sub dl,2
+    sub dl,FWPosition     
+    mov al,EWPosition
+    sub al,dl
+  
+    setPosition al,EWPosition
+      
+                                                  ;reverse second word
+    LoadStr3:
+    
+      lodsb
+      push ax   
+      
+    loop LoadStr3
+    
+    xor ax,ax
+    xor dx,dx
+    mov dl,SWPosition
+    sub dl,2
+    sub dl,FWPosition     
+    mov al,EWPosition
+    sub al,dl 
+    
+    setPosition al,EWPosition
+                             
+    TakeStr3:  
+      
+      pop dx
+      mov [si],dl
+      inc si    
+      
+    loop TakeStr3 
+    
+    xor dx,dx
+    xor ax,ax
+    mov si,offset buff
+    
+endm
+ 
+
+setPosition macro firstBorder,secondBorder 
+    
+    mov si,offset buff
+    xor bh,bh
+    mov bl,firstBorder
+    add si,bx
+     
+     
+    xor bh,bh
+    mov bl,secondBorder
+    sub bl,firstBorder  
+     
+    mov cx,bx
+    inc cx 
+    
+    xor bx,bx 
+      
+endm
+    
+
+start: 
+                                            
+    mov ax, @data
+	mov	ds, ax      
+	          
+	print info_msg1  
+	inputStr buffSize   
+	
+	cmp realSize,0
+	Je Contin   
+	
+	repLastEnter buff,realSize 
+	print newString   
+	
+	deleteSpaces buff  
+	mov al,updatedSize
+	mov realSize,al
+	print info_msg9
+	
+	jmp Contin2 
+	
+	Contin:
+	jmp EndOfProgram  
+	
+	Contin2:
+	print newString
+	print buff
+	
+	dec wordNumber
+
+	BubleLoop:
+	    
+	    prepStr buff,realSize  
+	    findTwoWords        
+	    
+	    cmp isSorted,0
+	    Je continue      
+	    
+	    print newString
+	    print info_msg8
+	        
+	    print newString
+	    print buff
+	    
+	    dec wordNumber
+	    cmp wordNumber,0
+	    je continue    
+	    
+	jmp BubleLoop
+	
+	continue:   
+	repLastEnter buff,realSize
+	
+	print newString
+	print info_msg7   
+	
+	print newString
+	print buff 
+	 	
+	    
+	EndOfProgram:  
+	    
+    mov	ax, 4c00h
+	int	21h             
+		
+end start
